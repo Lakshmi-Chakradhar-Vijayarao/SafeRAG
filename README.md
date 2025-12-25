@@ -1,80 +1,94 @@
-# SafeRAG: Semantic Claim-Level Verification for Reliable RAG Systems
+---
 
-SafeRAG is a **post-generation verification and safety control system** designed to detect, measure, and mitigate hallucinations in Retrieval-Augmented Generation (RAG) pipelines.
+# SafeRAG — Claim-Level Hallucination Detection & Verification Engine
 
-Unlike standard RAG systems that implicitly trust model outputs, SafeRAG **treats hallucination as a system-level failure** and explicitly verifies generated content **at the claim level** using **semantic entailment, evidence aggregation, and decision gating**.
+SafeRAG is a **production-ready, post-generation verification and safety control system** for Retrieval-Augmented Generation (RAG) pipelines.
+It detects, measures, and prevents hallucinations by **verifying model outputs at the semantic claim level**, rather than trusting the generated answer as a whole.
 
-The system is **fully executable**, **deterministic**, and **auditable**, making it suitable for **safety-critical domains** such as healthcare, finance, and policy.
+Unlike standard RAG systems, SafeRAG treats hallucination as a **system-level reliability failure** and enforces **explicit safety decisions** before any output reaches the user.
+
+SafeRAG is:
+
+* **Deterministic**
+* **Auditable**
+* **Policy-controlled**
+* **Quantitatively evaluated**
+* **Deployable via API**
+
+It is suitable for **safety-critical domains** such as healthcare, finance, policy, and enterprise AI systems.
 
 ---
 
-## Key Idea
+## Core Insight
 
-> Hallucinations are not just a model problem — they are a **missing verification problem**.
+> **Hallucinations are not just a model problem — they are a missing verification problem.**
 
-SafeRAG introduces an explicit verification layer **after generation** that:
-
-1. decomposes model outputs into atomic claims
-2. retrieves supporting evidence
-3. verifies each claim semantically
-4. enforces safety decisions (ACCEPT / REJECT / REFUSE)
+SafeRAG introduces an explicit verification layer **after generation** that independently checks whether the model’s claims are actually supported by evidence.
 
 ---
 
-## Core Capabilities
+## What SafeRAG Does (At a Glance)
 
-* **Claim-level verification** (not answer-level scoring)
-* **Semantic entailment** using sentence embeddings
-* **Multi-evidence aggregation**
-* **Explicit safety decisions**
-* **Quantitative reliability metrics**
-* **PyTorch-only execution (no TensorFlow dependency)**
+SafeRAG performs the following steps on any LLM output:
+
+1. **Extracts atomic factual claims**
+2. **Retrieves supporting evidence**
+3. **Verifies claims semantically**
+4. **Aggregates evidence conservatively**
+5. **Applies policy-driven safety gating**
+6. **Logs auditable verification results**
+
+SafeRAG **does not generate text**.
+It **controls whether generated text is allowed to pass**.
 
 ---
 
-## High-Level Architecture
+## System Architecture
 
 ```
-Generated Answer
-      ↓
+LLM / RAG Output
+        ↓
 Claim Extraction
-      ↓
+        ↓
 Evidence Retrieval (BM25)
-      ↓
+        ↓
 Semantic Claim–Evidence Verification
-      ↓
-Aggregation & Metrics
-      ↓
-Decision Gating (ACCEPT / REJECT / REFUSE)
+        ↓
+Conservative Aggregation
+        ↓
+Reliability Metrics
+        ↓
+Safety Decision
+ (ACCEPT / REJECT / REFUSE)
 ```
 
-SafeRAG acts as a **control layer**, not a generator.
+SafeRAG acts as a **control plane**, not a generator.
 
 ---
 
-## End-to-End Workflow
+## Verification Workflow
 
-### 1. Model Output (Input to SafeRAG)
+### 1. Input (Already-Generated Text)
 
-SafeRAG operates on **already-generated text** from any LLM or RAG system.
+SafeRAG operates on outputs from any LLM or RAG system.
 
 Example:
 
 ```
-The first line treatment for type 2 diabetes is metformin.
-Combining ACE inhibitors and ARBs is a recommended strategy.
+Metformin is the first line treatment for type 2 diabetes.
+ACE inhibitors and ARBs should always be combined.
 ```
 
 ---
 
 ### 2. Claim Extraction
 
-The output is decomposed into **atomic factual claims**:
+The text is decomposed into **atomic claims**:
 
-* “The first line treatment for type 2 diabetes is metformin”
-* “Combining ACE inhibitors and ARBs is a recommended strategy”
+* “Metformin is the first line treatment for type 2 diabetes”
+* “ACE inhibitors and ARBs should always be combined”
 
-This avoids hiding hallucinations inside long responses.
+This prevents hallucinations from being hidden inside long responses.
 
 ---
 
@@ -83,86 +97,189 @@ This avoids hiding hallucinations inside long responses.
 For each claim:
 
 * Top-k evidence passages are retrieved using **BM25**
-* Each passage is tracked with an ID and relevance score
+* Each passage is tracked with a document ID and relevance score
 
 ---
 
-### 4. Semantic Verification
+### 4. Semantic Claim Verification
 
 Each claim–evidence pair is evaluated using **sentence embeddings**:
 
-* semantic similarity score
-* negation and polarity checks
-* claim classified as:
+* Semantic similarity scoring
+* Negation and polarity detection
+* Claim classification:
 
   * **SUPPORTED**
   * **CONTRADICTED**
   * **INSUFFICIENT_EVIDENCE**
 
-This handles paraphrases and avoids brittle lexical matching.
+This avoids brittle keyword matching and handles paraphrases.
 
 ---
 
-### 5. Multi-Evidence Aggregation
+### 5. Conservative Aggregation
 
-Verification decisions are aggregated across multiple evidence sources to reduce single-document bias.
+Multiple evidence results are aggregated conservatively:
 
-Final claim label is chosen conservatively:
-
-* any contradiction → CONTRADICTED
-* otherwise supported evidence → SUPPORTED
-* else → INSUFFICIENT_EVIDENCE
+* Any contradiction → **CONTRADICTED**
+* Otherwise any support → **SUPPORTED**
+* Else → **INSUFFICIENT_EVIDENCE**
 
 ---
 
-### 6. Metrics & Safety Decision
+### 6. Safety Decision
 
-SafeRAG computes system-level reliability metrics and enforces a decision:
+System-level decision enforced via policy:
 
-* **ACCEPT** → output is reliable
-* **REJECT** → contradiction detected
-* **REFUSE** → insufficient evidence
+* **ACCEPT** → Output is reliable
+* **REJECT** → Contradiction detected
+* **REFUSE** → Insufficient evidence or uncertainty
 
-This mirrors real safety policies in clinical and enterprise AI systems.
-
----
-
-## Example Output
-
-```
-Claim: The first line treatment for type 2 diabetes is metformin
-Final Label: SUPPORTED
-Semantic Score: 0.975
-
-Claim: Combining ACE inhibitors and ARBs is a recommended strategy
-Final Label: CONTRADICTED
-Semantic Score: 0.71
-
-METRICS:
-{
-  "support_rate": 0.5,
-  "contradiction_rate": 0.5,
-  "insufficient_rate": 0.0,
-  "hallucination_rate": 0.5,
-  "avg_semantic_score": 0.84
-}
-
-SYSTEM DECISION: REJECT
-```
+This mirrors real-world safety policies in regulated systems.
 
 ---
 
 ## Reliability Metrics
 
-SafeRAG reports:
+SafeRAG computes quantitative reliability metrics for every request:
 
-* **Support Rate**
-* **Contradiction Rate**
-* **Insufficient Evidence Rate**
-* **Hallucination Rate**
-* **Average Semantic Alignment Score**
+* Support rate
+* Contradiction rate
+* Insufficient evidence rate
+* Hallucination rate
+* Average semantic alignment score
 
-These metrics allow **quantitative evaluation**, not subjective judgment.
+These metrics enable **measured evaluation**, not subjective judgment.
+
+---
+
+## Example Output
+
+```json
+{
+  "decision": "REFUSE",
+  "claims": [
+    {
+      "claim": "ACE inhibitors and ARBs should always be combined",
+      "label": "INSUFFICIENT_EVIDENCE",
+      "score": 0.485,
+      "evidence_ids": ["0", "1", "2"]
+    }
+  ],
+  "metrics": {
+    "support_rate": 0.0,
+    "contradiction_rate": 0.0,
+    "insufficient_rate": 1.0,
+    "hallucination_rate": 1.0,
+    "avg_semantic_score": 0.485
+  }
+}
+```
+
+---
+
+## Evaluation & Benchmarking
+
+SafeRAG includes a **lightweight, reproducible evaluation harness** to quantify hallucination reduction.
+
+### Datasets
+
+* Clinical examples
+* Finance examples
+
+### Evaluation Measures
+
+* Baseline hallucination rate (no gating)
+* Hallucinations reaching the user **after SafeRAG gating**
+
+### Run Evaluation
+
+```bash
+python eval/run_eval.py
+```
+
+Example result:
+
+```
+Baseline hallucination rate: 0.667
+SafeRAG pass-through hallucination rate: 0.0
+```
+
+This demonstrates **complete elimination of hallucinations reaching the user** in evaluated cases.
+
+---
+
+## API Usage (Demo-Ready)
+
+SafeRAG exposes a **FastAPI service** for integration and demonstration.
+
+### Start the API
+
+```bash
+python run_api.py
+```
+
+### Open Interactive Docs
+
+```
+http://127.0.0.1:8000/docs
+```
+
+### Endpoint
+
+```
+POST /verify
+```
+
+The UI allows you to:
+
+* Paste generated text
+* Run verification
+* Inspect claims, metrics, and decisions
+
+This serves as the **live demo surface** for SafeRAG.
+
+---
+
+## Auditability
+
+Every verification request generates an **immutable audit log**:
+
+```
+logs/saferag_audit.jsonl
+```
+
+Each entry includes:
+
+* Input text
+* Extracted claims
+* Evidence usage
+* Metrics
+* Final decision
+* Timestamp
+
+Audit logging is **non-blocking** and **fail-safe**.
+
+---
+
+## Automated Safety Tests
+
+SafeRAG includes **automated system-level tests** that verify:
+
+* Supported claims → ACCEPT
+* Contradictions → REJECT
+* Gibberish / low-signal input → REFUSE
+* Long inputs are bounded
+* Deterministic execution
+* Audit logs are written
+
+Run tests:
+
+```bash
+pytest -v
+```
+
+All tests must pass before deployment.
 
 ---
 
@@ -170,51 +287,17 @@ These metrics allow **quantitative evaluation**, not subjective judgment.
 
 ```
 saferag/
-├── main.py            # End-to-end execution & decision gating
-├── claims.py          # Atomic claim extraction
-├── retriever.py       # Evidence retrieval (BM25)
-├── semantic.py        # Semantic entailment scoring
-├── verifier.py        # Claim classification logic
-├── metrics.py         # Reliability metrics
-├── data/
-│   ├── documents.txt  # Evidence corpus
-│   └── generations.txt# Model outputs to verify
+├── app/            # API, schemas, audit logging
+├── core/           # Claim extraction, retrieval, verification
+├── eval/           # Evaluation harness & datasets
+├── tests/          # Automated safety tests
+├── data/           # Evidence corpus
+├── policies/       # Verification policies
+├── run_api.py      # API entrypoint
+├── saferag_bootstrap.py
 ├── requirements.txt
 └── README.md
 ```
-
----
-
-## Installation
-
-Create a virtual environment (recommended):
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-```
-
-Install dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-Force PyTorch-only execution:
-
-```bash
-export TRANSFORMERS_NO_TF=1
-```
-
----
-
-## Run SafeRAG
-
-```bash
-python main.py
-```
-
-SafeRAG executes fully offline and deterministically.
 
 ---
 
@@ -222,8 +305,9 @@ SafeRAG executes fully offline and deterministically.
 
 * **Verification over trust**
 * **Claims over answers**
-* **Explicit safety decisions**
-* **Auditable system behavior**
+* **Fail-safe by default**
+* **Policy-driven decisions**
+* **Auditable execution**
 * **Model-agnostic integration**
 
 SafeRAG does not replace RAG — it **controls it**.
@@ -232,44 +316,45 @@ SafeRAG does not replace RAG — it **controls it**.
 
 ## Limitations
 
-* Uses embedding similarity, not full logical inference
-* Performance depends on evidence corpus quality
-* Designed for post-generation verification (not generation itself)
+* Uses semantic similarity rather than full logical inference
+* Dependent on evidence corpus quality
+* Post-generation verification only (intentional)
 
-These are intentional trade-offs for transparency and reliability.
+These trade-offs favor **transparency, control, and reliability**.
 
 ---
 
-## Relevance Beyond Healthcare
+## Applications
 
-Although demonstrated on clinical examples, SafeRAG generalizes to:
+SafeRAG is applicable to:
 
-* financial compliance systems
-* legal document analysis
-* policy verification
-* autonomous decision pipelines
-* safety-critical AI control systems
+* Clinical decision support
+* Financial compliance checks
+* Legal document validation
+* Policy analysis
+* Enterprise AI safety layers
+* Autonomous decision pipelines
 
-The architecture is domain-agnostic.
+The architecture is **domain-agnostic**.
 
 ---
 
 ## Author
 
 **Lakshmi Chakradhar Vijayarao**
-AI Engineer — LLMs, RAG, Reinforcement Learning, AI Safety
-Focus: **Reliable, auditable, system-level AI design**
+AI Engineer — LLMs, RAG, AI Safety
+Focus: **Reliable, auditable, system-level AI systems**
 
 ---
 
 ## Final Note
 
-SafeRAG is intentionally **simple, explicit, and controllable**.
+SafeRAG is intentionally **simple, explicit, and bounded**.
 
 Its strength is not scale —
 its strength is **correctness under uncertainty**.
 
-That is what reliable AI systems are built on.
+That is what production-grade AI systems are built on.
 
 ---
 
