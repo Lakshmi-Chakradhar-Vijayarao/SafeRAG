@@ -35,7 +35,7 @@ def token_overlap_ratio(a: str, b: str) -> float:
 
 
 # --------------------------------------------------
-# Claim clustering (for analysis / metrics only)
+# Claim clustering (metrics / analysis only)
 # --------------------------------------------------
 
 def cluster_claims(claim_results, threshold=0.5):
@@ -110,7 +110,7 @@ def run_saferag(request):
 
             labels = [v["label"] for v in verdicts]
 
-            # Claim-level priority
+            # Claim-level priority (strict, deterministic)
             if "REFUTED" in labels:
                 final = next(v for v in verdicts if v["label"] == "REFUTED")
             elif "VERIFIED" in labels:
@@ -120,14 +120,16 @@ def run_saferag(request):
             else:
                 final = verdicts[0]  # UNSUPPORTED
 
+            # IMPORTANT: schema-aligned output
             claim_results.append({
                 "claim": claim,
                 "label": final["label"],
-                "semantic_score": final["semantic_score"],
+                "score": final["semantic_score"],   # required by API schema
+                "evidence_ids": [],                 # deterministic placeholder
             })
 
         # --------------------------------------------------
-        # Metrics (dominant cluster for reporting only)
+        # Metrics (dominant cluster — reporting only)
         # --------------------------------------------------
         clusters = cluster_claims(claim_results)
         dominant_cluster = clusters[0]
@@ -143,19 +145,19 @@ def run_saferag(request):
         }
 
         # --------------------------------------------------
-        # SYSTEM-LEVEL DECISION (SAFETY-FIRST)
+        # SYSTEM-LEVEL DECISION (GLOBAL SAFETY)
         # --------------------------------------------------
         all_labels = [c["label"] for c in claim_results]
 
-        # Absolute safety rule
+        # Hard safety rule: any contradiction → REJECT
         if "REFUTED" in all_labels:
             decision = "REJECT"
 
-        # Accept only if EVERY claim is verified
+        # Accept ONLY if every claim is verified
         elif all(l == "VERIFIED" for l in all_labels):
             decision = "ACCEPT"
 
-        # Everything else → uncertainty
+        # Otherwise: uncertainty → REFUSE
         else:
             decision = policy.get("on_insufficient", "REFUSE")
 
