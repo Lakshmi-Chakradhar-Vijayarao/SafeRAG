@@ -1,0 +1,6 @@
+contradiction_threshold: 0.7
+min_support_rate: 0.6
+on_insufficient: REFUSE
+claim_extraction_mode: strict   # strict | fallback
+max_claims: 10
+max_evidence_per_claim: 3

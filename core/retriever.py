@@ -26,7 +26,25 @@ class EvidenceRetriever:
             {
                 "doc_id": idx,
                 "text": self.documents[idx],
-                "score": round(scores[idx], 3)
+                "score": round(float(scores[idx]), 3)
             }
             for idx in ranked_indices[:top_k]
         ]
+
+
+# -------------------------
+# Functional Wrapper (PRODUCTION)
+# -------------------------
+
+_DEFAULT_RETRIEVER = None
+
+
+def initialize_retriever(documents):
+    global _DEFAULT_RETRIEVER
+    _DEFAULT_RETRIEVER = EvidenceRetriever(documents)
+
+
+def retrieve_evidence(claim, top_k=3):
+    if _DEFAULT_RETRIEVER is None:
+        raise RuntimeError("EvidenceRetriever not initialized")
+    return _DEFAULT_RETRIEVER.retrieve(claim, top_k)

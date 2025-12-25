@@ -1,7 +1,8 @@
-from retriever import EvidenceRetriever
-from claims import extract_claims
-from verifier import classify_claim
-from metrics import compute_metrics
+from core.retriever import initialize_retriever
+from core.claims import extract_claims
+from core.verifier import classify_claim, final_decision
+from core.metrics import compute_metrics
+from core.retriever import retrieve_evidence
 
 
 def load_lines(path):
@@ -13,55 +14,39 @@ def main():
     documents = load_lines("data/documents.txt")
     generations = load_lines("data/generations.txt")
 
-    retriever = EvidenceRetriever(documents)
-    generation = generations[0]
+    initialize_retriever(documents)
 
+    generation = generations[0]
     print("\nMODEL OUTPUT:\n", generation)
 
     claims = extract_claims(generation)
-    verification_results = []
-
-    print("\nCLAIM VERIFICATION:")
+    results = []
 
     for claim in claims:
-        evidence_list = retriever.retrieve(claim, top_k=3)
+        evidence_list = retrieve_evidence(claim)
 
-        votes = []
-        for ev in evidence_list:
-            result = classify_claim(claim, ev["text"])
-            result["evidence_id"] = ev["doc_id"]
-            result["evidence_score"] = ev["score"]
-            votes.append(result)
+        verdicts = [classify_claim(claim, ev["text"]) for ev in evidence_list]
 
-        labels = [v["label"] for v in votes]
-        if "CONTRADICTED" in labels:
-            final_label = "CONTRADICTED"
-        elif "SUPPORTED" in labels:
-            final_label = "SUPPORTED"
+        if any(v["label"] == "CONTRADICTED" for v in verdicts):
+            label = "CONTRADICTED"
+        elif any(v["label"] == "SUPPORTED" for v in verdicts):
+            label = "SUPPORTED"
         else:
-            final_label = "INSUFFICIENT_EVIDENCE"
+            label = "INSUFFICIENT_EVIDENCE"
 
-        final = votes[0]
-        final["label"] = final_label
-        verification_results.append(final)
+        best = max(verdicts, key=lambda v: v["semantic_score"])
+        best["label"] = label
+        results.append(best)
 
         print(f"\nClaim: {claim}")
-        print("Final Label:", final_label)
-        print("Evidence:", final["evidence"])
-        print("Semantic Score:", final["semantic_score"])
+        print("Final Label:", label)
+        print("Evidence:", best["evidence"])
+        print("Semantic Score:", best["semantic_score"])
 
-    metrics = compute_metrics(verification_results)
+    metrics = compute_metrics(results)
+    decision = final_decision(results)
 
     print("\nMETRICS:", metrics)
-
-    # === SAFETY DECISION ===
-    if metrics["contradiction_rate"] > 0:
-        decision = "REJECT"
-    elif metrics["insufficient_rate"] > 0.3:
-        decision = "REFUSE"
-    else:
-        decision = "ACCEPT"
-
     print("\nSYSTEM DECISION:", decision)
 
 

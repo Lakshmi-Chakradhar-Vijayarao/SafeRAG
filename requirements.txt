@@ -1,1 +1,8 @@
+pydantic
+fastapi
+uvicorn
+sentence-transformers
 rank-bm25
+scikit-learn
+PyYAML
+pytest
