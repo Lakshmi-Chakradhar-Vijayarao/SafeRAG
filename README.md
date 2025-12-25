@@ -1,3 +1,5 @@
+---
+
 # SafeRAG — Safety-Gated, Claim-Level Verification for RAG Systems
 
 SafeRAG is a **post-generation verification and safety-gating system** for Retrieval-Augmented Generation (RAG) and LLM pipelines.
@@ -18,7 +20,7 @@ SafeRAG introduces a **separate, explicit verification layer after generation** 
 
 > *Are the claims the model produced actually supported by evidence?*
 
-If not, the output is **blocked, refused, or rejected**.
+If not, the output is **safely contained** — blocked, refused, or rejected — rather than silently passed to the user.
 
 ---
 
@@ -72,7 +74,7 @@ Safety Decision
 
 SafeRAG operates on text produced by **any LLM or RAG system**.
 
-Example input:
+Example:
 
 ```
 Metformin is the first line treatment for type 2 diabetes.
@@ -83,9 +85,7 @@ ACE inhibitors and ARBs should always be combined.
 
 ### 2. Claim Extraction
 
-The output is decomposed into **atomic, factual claims**.
-
-Example:
+The output is decomposed into **atomic, factual claims**:
 
 * “Metformin is the first line treatment for type 2 diabetes”
 * “ACE inhibitors and ARBs should always be combined”
@@ -110,9 +110,9 @@ Each claim–evidence pair is classified into one of four **explicit truth state
 
 | Label              | Meaning                                       |
 | ------------------ | --------------------------------------------- |
-| **VERIFIED**       | Claim is supported by evidence                |
-| **REFUTED**        | Claim contradicts evidence                    |
-| **UNSUPPORTED**    | Evidence is insufficient                      |
+| **VERIFIED**       | Supported by evidence                         |
+| **REFUTED**        | Contradicts evidence                          |
+| **UNSUPPORTED**    | Insufficient evidence                         |
 | **RISKY_ABSOLUTE** | Overconfident or absolute claim without proof |
 
 Classification uses:
@@ -121,19 +121,19 @@ Classification uses:
 * Negation and polarity detection
 * Phrase-level grounding for high-confidence cases
 
-No policy decisions happen at this stage.
+**No policy decisions happen here.**
 
 ---
 
 ### 5. Conservative Claim Aggregation
 
-If multiple evidence passages exist for a claim:
+If multiple evidence passages exist:
 
 * Any **REFUTED** verdict dominates
 * Otherwise **VERIFIED** dominates
 * Otherwise uncertainty is preserved
 
-This ensures **safety-first behavior**.
+This enforces **safety-first behavior**.
 
 ---
 
@@ -143,7 +143,7 @@ Claims are grouped by **lexical similarity** to identify the **dominant intent**
 
 This prevents:
 
-* One strong claim masking multiple weak or unsafe claims
+* One strong claim masking multiple unsafe claims
 * Mixed outputs being incorrectly accepted
 
 System decisions are based on the **dominant claim cluster**, not isolated claims.
@@ -154,13 +154,13 @@ System decisions are based on the **dominant claim cluster**, not isolated claim
 
 Final decision is enforced **after verification**:
 
-| Decision   | Meaning                          |
-| ---------- | -------------------------------- |
-| **ACCEPT** | All dominant claims are verified |
-| **REFUSE** | Claims are uncertain or risky    |
-| **REJECT** | Contradictions detected          |
+| Decision   | Meaning                                         |
+| ---------- | ----------------------------------------------- |
+| **ACCEPT** | Dominant claims are verified                    |
+| **REFUSE** | Output is uncertain or risky (safe containment) |
+| **REJECT** | Explicit contradiction detected                 |
 
-SafeRAG is **fail-safe by default**.
+**REFUSE is not failure** — it is an intentional, safe outcome when reliability cannot be established.
 
 ---
 
@@ -170,10 +170,11 @@ For every request, SafeRAG computes:
 
 * Support rate
 * Contradiction rate
-* Hallucination rate
 * Decision distribution
+* Pass-through hallucination rate
 
-Metrics are deterministic and reproducible.
+> **Key distinction:**
+> SafeRAG measures not just hallucinations *detected*, but hallucinations **reaching the user**.
 
 ---
 
@@ -186,7 +187,7 @@ SafeRAG includes a **fully reproducible evaluation harness**.
 * Clinical domain
 * Finance domain
 
-Each dataset contains:
+Each dataset includes:
 
 * Supported claims
 * Unsupported claims
@@ -225,159 +226,74 @@ Decision distribution:
   REJECT: 1
 ```
 
-**Zero hallucinations reached the user after gating.**
+**Hallucinations still exist — but none reach the user after gating.**
 
 ---
 
 ## API Usage (Demo Ready)
 
-SafeRAG exposes a **FastAPI service** for integration and demonstration.
-
-### Start API
+SafeRAG exposes a **FastAPI service**.
 
 ```bash
 python run_api.py
 ```
 
-### Interactive Docs
+Docs:
 
 ```
 http://127.0.0.1:8000/docs
 ```
 
-### Endpoint
+Endpoint:
 
 ```
 POST /verify
 ```
 
-The API returns:
-
-* Extracted claims
-* Claim truth labels
-* Metrics
-* Final decision
-
 ---
 
 ## Auditability
 
-Every request generates a **structured audit log**:
+Every request generates a structured audit log:
 
 ```
 logs/saferag_audit.jsonl
 ```
 
-Each entry contains:
+Includes:
 
-* Input text
-* Claim breakdown
-* Evidence usage
+* Claims
+* Labels
 * Metrics
 * Final decision
 * Timestamp
 
-Audit logging is:
-
-* Deterministic
-* Non-blocking
-* Fail-safe
+Audit logging is deterministic, non-blocking, and fail-safe.
 
 ---
 
 ## Automated Safety Tests
 
-SafeRAG includes **system-level tests** validating:
+SafeRAG includes system-level tests validating:
 
 * Supported claims → ACCEPT
 * Contradictions → REJECT
 * Mixed claims → REFUSE / REJECT
 * Gibberish → REFUSE
-* Long inputs bounded
-* Deterministic execution
+* Determinism
 * Audit logging
-
-Run:
 
 ```bash
 pytest -v
 ```
 
-All tests must pass before deployment.
-
 ---
 
-## Repository Structure
+## Architecture Overview (Conceptual)
 
-```
-SafeRAG/
-├── app/        # API, schemas, audit logging
-├── core/       # Claims, retrieval, verification, policy
-├── eval/       # Evaluation harness & datasets
-├── tests/      # Automated safety tests
-├── data/       # Evidence corpus
-├── policies/   # Decision policies
-├── run_api.py
-├── saferag_bootstrap.py
-└── README.md
-```
+*(keep your ASCII diagram exactly as is — it’s excellent)*
 
 ---
-Architecture Overview (Conceptual)
-```
- ┌─────────────────────────────┐
- │     LLM / RAG Generator     │
- │ (Any model, any framework)  │
- └──────────────┬──────────────┘
-                │
-                ▼
- ┌─────────────────────────────┐
- │   Generated Natural Text    │
- │ (Untrusted model output)    │
- └──────────────┬──────────────┘
-                │
-                ▼
- ┌─────────────────────────────┐
- │     Claim Extraction        │
- │  (Atomic factual claims)   │
- │  core/claims.py             │
- └──────────────┬──────────────┘
-                │
-                ▼
- ┌─────────────────────────────┐
- │   Evidence Retrieval        │
- │   (BM25 / lexical search)  │
- │   core/retriever.py         │
- └──────────────┬──────────────┘
-                │
-                ▼
- ┌─────────────────────────────┐
- │ Claim–Evidence Verification │
- │  Truth Classification       │
- │ VERIFIED / REFUTED / etc.   │
- │ core/verifier.py            │
- └──────────────┬──────────────┘
-                │
-                ▼
- ┌─────────────────────────────┐
- │ Conservative Aggregation    │
- │ + Dominant Claim Clustering │
- │ app/service.py              │
- └──────────────┬──────────────┘
-                │
-                ▼
- ┌─────────────────────────────┐
- │ Policy-Based Safety Gating  │
- │ ACCEPT / REFUSE / REJECT    │
- │ policies/default.yaml       │
- └──────────────┬──────────────┘
-                │
-                ▼
- ┌─────────────────────────────┐
- │  Auditable Output & Metrics │
- │ logs/saferag_audit.jsonl    │
- └─────────────────────────────┘
-
 
 ## Design Principles
 
@@ -395,23 +311,10 @@ SafeRAG does not replace RAG — **it controls it**.
 ## Limitations (Intentional)
 
 * No full logical inference engine
-* Depends on evidence corpus quality
+* Dependent on evidence corpus quality
 * Post-generation only (by design)
 
 These trade-offs favor **transparency and control over opacity**.
-
----
-
-## Applications
-
-SafeRAG is suitable for:
-
-* Clinical decision support
-* Financial compliance
-* Legal document validation
-* Policy analysis
-* Enterprise AI safety layers
-* Autonomous decision pipelines
 
 ---
 
@@ -419,7 +322,6 @@ SafeRAG is suitable for:
 
 **Lakshmi Chakradhar Vijayarao**
 AI Engineer — LLMs, RAG, AI Safety
-Focus: **Reliable, auditable, system-level AI systems**
 
 ---
 
@@ -433,4 +335,5 @@ its strength is **correct behavior under uncertainty**.
 That is what production-grade AI systems require.
 
 ---
+
 
