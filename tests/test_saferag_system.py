@@ -1,23 +1,18 @@
 """
 SafeRAG System Test Suite
 
-Automated tests validating:
-- Claim-level verification
-- Hallucination detection
+Validates:
+- Claim truth classification
 - Safety gating
+- Hallucination containment
 - Fail-safe behavior
 - Determinism
 - Audit logging
-
-Each test maps directly to TEST_BENCH.md.
 """
 
 import sys
 from pathlib import Path
 
-# --------------------------------------------------
-# Ensure project root is on PYTHONPATH
-# --------------------------------------------------
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(ROOT))
 
@@ -27,24 +22,16 @@ from app.service import run_saferag
 from app.schemas import SafeRAGRequest
 
 
-# --------------------------------------------------
-# Global test setup
-# --------------------------------------------------
-
 @pytest.fixture(scope="session", autouse=True)
 def setup_saferag():
-    """
-    Initialize SafeRAG once for all tests.
-    """
     bootstrap()
 
 
 # --------------------------------------------------
-# Test Category 1 — Supported Claims
+# Supported / Verified claims
 # --------------------------------------------------
 
 def test_supported_claim_accept():
-    """Fully supported factual claim should be ACCEPTED."""
     req = SafeRAGRequest(
         request_id="test_supported",
         generated_text="Metformin is the first line treatment for type 2 diabetes."
@@ -54,16 +41,15 @@ def test_supported_claim_accept():
 
     assert decision == "ACCEPT"
     assert len(claims) == 1
-    assert claims[0]["label"] == "SUPPORTED"
+    assert claims[0]["label"] == "VERIFIED"
     assert metrics["support_rate"] == 1.0
 
 
 # --------------------------------------------------
-# Test Category 2 — Unsupported Claims
+# Unsupported claims
 # --------------------------------------------------
 
 def test_unsupported_claim_refuse():
-    """Unsupported medical advice must be REFUSED or REJECTED."""
     req = SafeRAGRequest(
         request_id="test_unsupported",
         generated_text="ACE inhibitors and ARBs should always be combined."
@@ -72,15 +58,14 @@ def test_unsupported_claim_refuse():
     decision, claims, _ = run_saferag(req)
 
     assert decision in {"REFUSE", "REJECT"}
-    assert any(c["label"] != "SUPPORTED" for c in claims)
+    assert any(c["label"] in {"UNSUPPORTED", "RISKY_ABSOLUTE"} for c in claims)
 
 
 # --------------------------------------------------
-# Test Category 3 — Explicit Contradictions
+# Explicit contradictions
 # --------------------------------------------------
 
 def test_contradiction_reject():
-    """Semantic contradictions must trigger REJECT."""
     req = SafeRAGRequest(
         request_id="test_contradiction",
         generated_text="Insulin is never used for type 2 diabetes."
@@ -89,15 +74,14 @@ def test_contradiction_reject():
     decision, claims, _ = run_saferag(req)
 
     assert decision == "REJECT"
-    assert any(c["label"] == "CONTRADICTED" for c in claims)
+    assert any(c["label"] == "REFUTED" for c in claims)
 
 
 # --------------------------------------------------
-# Test Category 4 — Mixed Claims
+# Mixed claims
 # --------------------------------------------------
 
 def test_mixed_claims_refuse():
-    """Mixed supported + contradicted claims must not partially pass."""
     req = SafeRAGRequest(
         request_id="test_mixed",
         generated_text=(
@@ -110,16 +94,15 @@ def test_mixed_claims_refuse():
 
     assert decision in {"REFUSE", "REJECT"}
     assert len(claims) >= 2
-    assert any(c["label"] == "SUPPORTED" for c in claims)
-    assert any(c["label"] != "SUPPORTED" for c in claims)
+    assert any(c["label"] == "VERIFIED" for c in claims)
+    assert any(c["label"] != "VERIFIED" for c in claims)
 
 
 # --------------------------------------------------
-# Test Category 5 — Long Inputs
+# Long inputs
 # --------------------------------------------------
 
 def test_long_input_bounded():
-    """Excessively long input must not crash or hang."""
     long_text = "Metformin is first line treatment. " * 100
 
     req = SafeRAGRequest(
@@ -134,11 +117,10 @@ def test_long_input_bounded():
 
 
 # --------------------------------------------------
-# Test Category 6 — Nonsense Inputs
+# Gibberish input
 # --------------------------------------------------
 
 def test_gibberish_refuse():
-    """Low-signal gibberish input must be REFUSED."""
     req = SafeRAGRequest(
         request_id="test_gibberish",
         generated_text="asdkjh qweoiu zxcmn qweqwe"
@@ -151,11 +133,10 @@ def test_gibberish_refuse():
 
 
 # --------------------------------------------------
-# Test Category 7 — Empty Input
+# Empty input
 # --------------------------------------------------
 
 def test_empty_input_refuse():
-    """Empty input must be handled safely."""
     req = SafeRAGRequest(
         request_id="test_empty",
         generated_text=""
@@ -168,11 +149,10 @@ def test_empty_input_refuse():
 
 
 # --------------------------------------------------
-# Test Category 8 — Determinism
+# Determinism
 # --------------------------------------------------
 
 def test_deterministic_execution():
-    """Identical inputs must produce identical outputs."""
     req = SafeRAGRequest(
         request_id="test_determinism",
         generated_text="Metformin is first line treatment."
@@ -185,11 +165,10 @@ def test_deterministic_execution():
 
 
 # --------------------------------------------------
-# Test Category 9 — Audit Logging
+# Audit logging
 # --------------------------------------------------
 
 def test_audit_log_written():
-    """Every request must generate an audit entry."""
     req = SafeRAGRequest(
         request_id="test_audit",
         generated_text="Metformin is first line treatment."

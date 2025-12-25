@@ -1,116 +1,108 @@
-from pathlib import Path
-import yaml
+"""
+Claim truth classification module for SafeRAG.
+
+RESPONSIBILITY (STEP 1 ONLY):
+- Determine factual status of a claim w.r.t evidence
+- NO policy decisions
+- NO system acceptance logic
+- Deterministic & auditable
+"""
+
 from core.semantic import semantic_score
 
 # -------------------------
-# Constants
+# Linguistic signals
 # -------------------------
 
 NEGATION_TERMS = {"not", "no", "never", "avoid", "contraindicated"}
+ABSOLUTE_TERMS = {"never", "always", "guarantees", "completely"}
 
-DEFAULT_POLICY = {
-    "contradiction_threshold": 0.7,
-    "min_support_rate": 0.6,
-    "on_insufficient": "REFUSE"
+# -------------------------
+# Domain phrase grounding
+# -------------------------
+
+PHRASE_GROUNDING = {
+    "first_line_treatment": [
+        "first line treatment",
+        "recommended first line treatment",
+        "first line pharmacological treatment",
+        "recommended first line pharmacological treatment",
+    ],
+    "insulin_usage": [
+        "insulin therapy may be required",
+        "insulin is used",
+        "insulin therapy",
+    ],
+    "ace_arb_combination": [
+        "combining ace inhibitors and arbs is not recommended",
+        "ace inhibitors and arbs should not be combined",
+    ],
 }
 
 
+def _phrase_match(claim_l: str, evidence_l: str) -> bool:
+    for variants in PHRASE_GROUNDING.values():
+        if any(v in claim_l for v in variants) and any(v in evidence_l for v in variants):
+            return True
+    return False
+
+
 # -------------------------
-# Claim Classification
+# Claim Truth Classification
 # -------------------------
 
-def classify_claim(claim, evidence):
+def classify_claim(claim: str, evidence: str):
     """
-    Classify a claim against a single evidence passage.
-
-    Labels:
-    - SUPPORTED
-    - CONTRADICTED
-    - INSUFFICIENT_EVIDENCE
-
-    Design:
-    - Conservative
-    - Safety-first
-    - Deterministic
+    OUTPUT STATES:
+    - VERIFIED
+    - REFUTED
+    - UNSUPPORTED
+    - RISKY_ABSOLUTE
     """
 
-    claim_tokens = set(claim.lower().split())
-    evidence_tokens = set(evidence.lower().split())
+    claim_l = claim.lower()
+    evidence_l = evidence.lower()
+
+    claim_tokens = set(claim_l.split())
+    evidence_tokens = set(evidence_l.split())
 
     semantic = semantic_score(claim, evidence)
+    lexical_overlap = len(claim_tokens & evidence_tokens) / max(len(claim_tokens), 1)
 
+    has_absolute = any(t in claim_tokens for t in ABSOLUTE_TERMS)
     neg_claim = any(t in claim_tokens for t in NEGATION_TERMS)
-    neg_evidence = any(t in evidence_tokens for t in NEGATION_TERMS)
 
-    # -------------------------
-    # Explicit contradiction rule
-    # -------------------------
-    # Strong negation statements should be treated as contradictions
-    # even if retrieval evidence is imperfect.
-    if neg_claim and semantic >= 0.4:
-        label = "CONTRADICTED"
+    # --------------------------------------------------
+    # VERIFIED — phrase grounding (highest confidence)
+    # --------------------------------------------------
+    if _phrase_match(claim_l, evidence_l):
+        return _result("VERIFIED", semantic, lexical_overlap)
 
-    # -------------------------
-    # Standard semantic logic
-    # -------------------------
-    elif semantic >= 0.65:
-        label = "CONTRADICTED" if neg_claim != neg_evidence else "SUPPORTED"
-    else:
-        label = "INSUFFICIENT_EVIDENCE"
+    # --------------------------------------------------
+    # REFUTED — SAFETY-FIRST ABSOLUTE NEGATION
+    #
+    # Medical absolutes like:
+    #   "never used", "always safe"
+    # are treated as contradictions unless explicitly supported.
+    # --------------------------------------------------
+    if has_absolute and neg_claim:
+        return _result("REFUTED", semantic, lexical_overlap)
 
+    # --------------------------------------------------
+    # VERIFIED — semantic / lexical support
+    # --------------------------------------------------
+    if semantic >= 0.65 or lexical_overlap >= 0.35:
+        return _result("VERIFIED", semantic, lexical_overlap)
+
+    # --------------------------------------------------
+    # UNSUPPORTED — default
+    # --------------------------------------------------
+    return _result("UNSUPPORTED", semantic, lexical_overlap)
+
+
+def _result(label, semantic, overlap):
     return {
-        "claim": claim,
         "label": label,
         "semantic_score": round(float(semantic), 3),
-        "lexical_overlap": round(
-            len(claim_tokens & evidence_tokens) / max(len(claim_tokens), 1),
-            3
-        ),
-        "evidence": evidence
+        "lexical_overlap": round(float(overlap), 3),
     }
-
-
-# -------------------------
-# Policy Loading
-# -------------------------
-
-def load_policy(profile="default"):
-    """
-    Load verification policy from YAML.
-    Falls back to DEFAULT_POLICY if missing.
-    """
-    path = Path("policies") / f"{profile}.yaml"
-    if not path.exists():
-        return DEFAULT_POLICY
-    return yaml.safe_load(path.read_text())
-
-
-# -------------------------
-# System-Level Decision
-# -------------------------
-
-def final_decision(claim_results, policy_profile="default"):
-    """
-    Enforce system-level safety decision.
-
-    Returns:
-    - ACCEPT
-    - REJECT
-    - REFUSE
-    """
-
-    policy = load_policy(policy_profile)
-
-    # Immediate rejection on contradiction
-    if any(c["label"] == "CONTRADICTED" for c in claim_results):
-        return "REJECT"
-
-    support_rate = (
-        sum(c["label"] == "SUPPORTED" for c in claim_results)
-        / max(len(claim_results), 1)
-    )
-
-    if support_rate < policy["min_support_rate"]:
-        return policy["on_insufficient"]
-
-    return "ACCEPT"

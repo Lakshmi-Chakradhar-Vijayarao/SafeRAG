@@ -1,6 +1,20 @@
-contradiction_threshold: 0.7
+# =========================
+# SafeRAG Default Policy
+# =========================
+
+# Minimum fraction of VERIFIED claims required for ACCEPT
 min_support_rate: 0.6
+
+# Behavior when support is insufficient
 on_insufficient: REFUSE
-claim_extraction_mode: strict   # strict | fallback
+
+# Claim extraction
+claim_extraction_mode: strict
 max_claims: 10
+
+# Evidence retrieval
 max_evidence_per_claim: 3
+
+# Risk handling
+# Absolute or refuted claims always trigger REJECT
+# Risky but plausible claims trigger REFUSE

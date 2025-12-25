@@ -1,4 +1,24 @@
+# =========================
+# CLINICAL EVIDENCE
+# =========================
 
-Metformin is the first line treatment for type 2 diabetes.
-Combining ACE inhibitors and ARBs is not recommended due to safety risks.
-Lifestyle modification is recommended for diabetes.
+Metformin is the recommended first line pharmacological treatment for type 2 diabetes.
+Metformin improves insulin sensitivity and reduces hepatic glucose production.
+Lifestyle modification including diet, exercise, and weight management is recommended for managing type 2 diabetes.
+Lifestyle modification alone may not be sufficient for long-term glycemic control in all patients.
+Insulin therapy may be required in advanced, uncontrolled, or high-risk type 2 diabetes cases.
+Type 2 diabetes is a chronic condition that can lead to long-term complications if not adequately managed.
+Combining ACE inhibitors and ARBs is not recommended due to increased risk of kidney injury and hyperkalemia.
+No single treatment guarantees permanent remission of type 2 diabetes for all patients.
+
+# =========================
+# FINANCE EVIDENCE
+# =========================
+
+Diversification reduces investment risk by spreading exposure across assets.
+Diversification does not eliminate all investment risk.
+Index funds generally reduce long-term investment risk through diversification.
+Stock prices are influenced by company performance and market conditions.
+Stock market returns are volatile and not guaranteed.
+Government bonds have lower risk compared to stocks but are not completely risk free.
+

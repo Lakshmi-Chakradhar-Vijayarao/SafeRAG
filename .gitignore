@@ -1,9 +1,24 @@
-
-.venv/
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+
+# Logs
 logs/
-storage/
-.DS_Store
-.env
+*.log
+*.jsonl
+
+# Pytest
 .pytest_cache/
+
+# OS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/

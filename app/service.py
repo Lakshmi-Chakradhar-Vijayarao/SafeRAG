@@ -1,61 +1,106 @@
+"""
+SafeRAG execution service.
+
+RESPONSIBILITIES:
+- Orchestrate claim extraction
+- Retrieve evidence
+- Aggregate claim truth states
+- Apply policy to reach system decision
+- Emit metrics and audit logs
+
+NOTE:
+- Verifier returns ONLY truth labels
+- ACCEPT is allowed ONLY if all claims are VERIFIED
+- Any REFUTED claim blocks ACCEPT (global safety rule)
+"""
+
+from saferag_bootstrap import bootstrap
 from core.claims import extract_claims
 from core.retriever import retrieve_evidence
-from core.verifier import classify_claim, final_decision, load_policy
-from core.metrics import compute_metrics
+from core.verifier import classify_claim
 from app.audit import log_audit_event
-from saferag_bootstrap import bootstrap
+from core.policy import load_policy
 
+
+# --------------------------------------------------
+# Lexical similarity (deterministic, no embeddings)
+# --------------------------------------------------
+
+def token_overlap_ratio(a: str, b: str) -> float:
+    ta = set(a.lower().split())
+    tb = set(b.lower().split())
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / min(len(ta), len(tb))
+
+
+# --------------------------------------------------
+# Claim clustering (for analysis / metrics only)
+# --------------------------------------------------
+
+def cluster_claims(claim_results, threshold=0.5):
+    clusters = []
+
+    for c in claim_results:
+        placed = False
+        for cluster in clusters:
+            if token_overlap_ratio(c["claim"], cluster[0]["claim"]) >= threshold:
+                cluster.append(c)
+                placed = True
+                break
+        if not placed:
+            clusters.append([c])
+
+    clusters.sort(key=len, reverse=True)
+    return clusters
+
+
+# --------------------------------------------------
+# Main execution
+# --------------------------------------------------
 
 def run_saferag(request):
     """
-    Production-grade SafeRAG execution.
+    Execute SafeRAG end-to-end.
 
-    Guarantees:
-    - deterministic
-    - fail-safe
-    - auditable
-    - bounded
+    Returns:
+        decision: ACCEPT | REFUSE | REJECT
+        claim_results: list
+        metrics: dict
     """
 
-    # --- ENSURE SYSTEM INITIALIZATION ---
     bootstrap()
 
     try:
         policy = load_policy(request.policy_profile)
 
+        # --------------------------------------------------
+        # Claim extraction
+        # --------------------------------------------------
         claims = extract_claims(
             request.generated_text,
             mode=policy.get("claim_extraction_mode", "strict"),
-            max_claims=policy.get("max_claims", 10)
+            max_claims=policy.get("max_claims", 10),
         )
 
-        # Explicit empty-claim behavior
         if not claims:
             decision = policy.get("on_insufficient", "REFUSE")
-            claim_results = []
-            metrics = {}
-
             log_audit_event({
                 "audit_id": request.request_id,
-                "domain": request.domain,
-                "input": {
-                    "generated_text": request.generated_text,
-                    "policy_profile": request.policy_profile
-                },
-                "claims": claim_results,
-                "metrics": metrics,
                 "decision": decision,
-                "note": "No extractable claims"
+                "claims": [],
             })
+            return decision, [], {}
 
-            return decision, claim_results, metrics
-
+        # --------------------------------------------------
+        # Claim verification
+        # --------------------------------------------------
         claim_results = []
 
         for claim in claims:
             evidences = retrieve_evidence(
                 claim,
-                top_k=policy.get("max_evidence_per_claim", 3)
+                top_k=policy.get("max_evidence_per_claim", 3),
             )
 
             verdicts = [
@@ -63,67 +108,73 @@ def run_saferag(request):
                 for ev in evidences
             ]
 
-            # Conservative aggregation
-            if any(v["label"] == "CONTRADICTED" for v in verdicts):
-                final_label = "CONTRADICTED"
-            elif any(v["label"] == "SUPPORTED" for v in verdicts):
-                final_label = "SUPPORTED"
-            else:
-                final_label = "INSUFFICIENT_EVIDENCE"
+            labels = [v["label"] for v in verdicts]
 
-            best = max(verdicts, key=lambda v: v["semantic_score"])
+            # Claim-level priority
+            if "REFUTED" in labels:
+                final = next(v for v in verdicts if v["label"] == "REFUTED")
+            elif "VERIFIED" in labels:
+                final = next(v for v in verdicts if v["label"] == "VERIFIED")
+            elif "RISKY_ABSOLUTE" in labels:
+                final = next(v for v in verdicts if v["label"] == "RISKY_ABSOLUTE")
+            else:
+                final = verdicts[0]  # UNSUPPORTED
 
             claim_results.append({
                 "claim": claim,
-                "label": final_label,
-                "score": float(best["semantic_score"]),
-                "evidence_ids": [str(i) for i in range(len(evidences))]
+                "label": final["label"],
+                "semantic_score": final["semantic_score"],
             })
 
-        metrics = compute_metrics(
-            [
-                {"label": c["label"], "semantic_score": c["score"]}
-                for c in claim_results
-            ]
-        )
+        # --------------------------------------------------
+        # Metrics (dominant cluster for reporting only)
+        # --------------------------------------------------
+        clusters = cluster_claims(claim_results)
+        dominant_cluster = clusters[0]
 
-        decision = final_decision(
-            [{"label": c["label"]} for c in claim_results],
-            request.policy_profile
-        )
+        dominant_labels = [c["label"] for c in dominant_cluster]
+        verified = dominant_labels.count("VERIFIED")
+        refuted = dominant_labels.count("REFUTED")
+        total = len(dominant_labels)
+
+        metrics = {
+            "support_rate": round(verified / max(total, 1), 3),
+            "contradiction_rate": round(refuted / max(total, 1), 3),
+        }
+
+        # --------------------------------------------------
+        # SYSTEM-LEVEL DECISION (SAFETY-FIRST)
+        # --------------------------------------------------
+        all_labels = [c["label"] for c in claim_results]
+
+        # Absolute safety rule
+        if "REFUTED" in all_labels:
+            decision = "REJECT"
+
+        # Accept only if EVERY claim is verified
+        elif all(l == "VERIFIED" for l in all_labels):
+            decision = "ACCEPT"
+
+        # Everything else → uncertainty
+        else:
+            decision = policy.get("on_insufficient", "REFUSE")
 
     except Exception as e:
-        # --- SYSTEM ERROR (NOT A SAFETY REFUSE) ---
-        decision = "ERROR"
-        claim_results = []
-        metrics = {}
-
         log_audit_event({
             "audit_id": request.request_id,
-            "domain": request.domain,
-            "input": {
-                "generated_text": request.generated_text,
-                "policy_profile": request.policy_profile
-            },
-            "claims": claim_results,
-            "metrics": metrics,
-            "decision": decision,
-            "error": str(e)
+            "decision": "ERROR",
+            "error": str(e),
         })
+        return "ERROR", [], {}
 
-        return decision, claim_results, metrics
-
-    # --- NORMAL AUDIT LOGGING ---
+    # --------------------------------------------------
+    # Audit log
+    # --------------------------------------------------
     log_audit_event({
         "audit_id": request.request_id,
-        "domain": request.domain,
-        "input": {
-            "generated_text": request.generated_text,
-            "policy_profile": request.policy_profile
-        },
+        "decision": decision,
         "claims": claim_results,
         "metrics": metrics,
-        "decision": decision
     })
 
     return decision, claim_results, metrics
