@@ -1,5 +1,3 @@
----
-
 # SafeRAG — Claim-Level Hallucination Detection & Verification Engine
 
 SafeRAG is a **production-ready, post-generation verification and safety control system** for Retrieval-Augmented Generation (RAG) pipelines.
@@ -356,5 +354,4 @@ its strength is **correctness under uncertainty**.
 
 That is what production-grade AI systems are built on.
 
----
 
